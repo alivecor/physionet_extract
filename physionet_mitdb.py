@@ -1,5 +1,6 @@
 import numpy as np
-import os,re,json
+import os,re
+import ujson as json
 from scipy import signal
 import wfdb
 from acpy.atc import write_atc_file
@@ -62,7 +63,7 @@ def split_physionet_file(record_path, dbname, record_name, split_length):
         span=atc_span[ind]
 
         #rescale and resample the actual signal
-        rescaled_signal = np.zeros(shape=[record.p_signal.shape[1],atcfs*targ_sec], dtype=np.int16)
+        rescaled_signal = np.zeros(shape=[record.p_signal.shape[1],atcfs*split_length], dtype=np.int16)
         for il in range(record.p_signal.shape[1]):
             resamp = 2000*signal.resample_poly(record.p_signal[span[0]:span[1],il],atcfs,record.fs)
             if np.any(np.abs(resamp)>=32768):
@@ -132,13 +133,6 @@ def generate_manifest(seg_list):
             'source': 'Moody GB, Mark RG. The impact of the MIT-BIH Arrhythmia Database. IEEE Eng in Med and Biol 20(3):45-50 (May-June 2001). (PMID: 11446209)'
         },
         'recordings': []
-        #,
-        # 'labels': {
-        #     'target': {
-        #         'type': 'global rhythm label',
-        #         'description': 'what alg-suite should output for the given physionet file'
-        #     }
-        # }
     }
     for seg in seg_list:
         for il in range(len(seg['header_leads'])):
@@ -172,7 +166,6 @@ def classify_mit_segments(all_segments):
         #compute the heart rate from the median difference between beats
         median_interval = np.median(seg['beat_index'][1:]-seg['beat_index'][:-1])
         heart_rate = 60*atcfs/median_interval
-        print(heart_rate)
 
         #are we outside our acceptable heart beat range?
         if heart_rate<40 or heart_rate>140:
@@ -196,12 +189,25 @@ def classify_mit_segments(all_segments):
     return(all_segments)
 
 
+mit_codepath = {
+    'db': 'mitdb',
+    'split': split_physionet_file,
+    'classify': classify_mit_segments,
+    'manifest': generate_manifest,
+    'write': write_atc_from_segment
+}
+
 if __name__ == "__main__":
+
+    code_path = mit_codepath
 
     #get the files in the database
     dbnames=set()
     dbpath = '/Users/schram/projects/physionet_extract/'
-    db = 'mitdb'
+    targpath = '/Users/schram/projects/physionet_extract/mitout'
+    if os.path.exists(targpath)==False:
+        os.makedirs(targpath)
+    db = code_path['db']
     for f in os.listdir(os.path.join(dbpath,db)):
         fnmatch = re.match('(.*)\.atr$',f)
         if fnmatch:
@@ -211,22 +217,21 @@ if __name__ == "__main__":
 
     all_segments = []
     for dbn in dbnames:
-        # if dbn == '104':
-        all_segments += split_physionet_file(dbpath,db,dbn,30)
-            # break           #TODO: remove when done
+        # all_segments += split_physionet_file(dbpath,db,dbn,30)
+        all_segments += code_path['split'](dbpath,db,dbn,30)
+
 
     #add our specific classifications to these
-    all_segments = classify_mit_segments(all_segments)
-
+    all_segments = code_path['classify'](all_segments)
 
     #create the manifest dictionary
-    manifest = generate_manifest( all_segments )
-    with open(os.path.join(dbpath,'MANIFEST.json'),'w') as f:
+    manifest = code_path['manifest']( all_segments )
+    with open(os.path.join(targpath,'MANIFEST.json'),'w') as f:
         json.dump(manifest,f,indent=4)
 
 
     for seg in all_segments:
-        write_atc_from_segment(seg, os.path.join(dbpath,db))
+        code_path['write'](seg, targpath)
 
 
 
