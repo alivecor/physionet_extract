@@ -150,7 +150,7 @@ def split_cudb_file(record_path, dbname, record_name, split_length, verbose=True
                 print('no beats in {}: {}'.format(record_name, (st,en)))
                 continue
             if beats[0]>(st+2*record.fs) or beats[-1]<(en-2*record.fs) or np.any( (beats[1:]-beats[:-1])>2*record.fs ):
-                print('excessively long gap in {}: {}'.format(record_name, (st,en)))
+                print('excessively long gap between beats in {}: {}'.format(record_name, (st,en)))
                 continue
 
             atc_span.append( (st,en) )
@@ -199,6 +199,93 @@ def split_cudb_file(record_path, dbname, record_name, split_length, verbose=True
 
     return(segments)
 
+#split_afdb_file - this function has similar logic to the split_physionet_file code, but changes how the 
+# boundaries are calculated as there are only rhythm annotations in the atr files in afdb, and the beat annotations are in the qrs files
+def split_afdb_file(record_path, dbname, record_name, split_length):
+    #read in the signal and the annotations
+    record = wfdb.rdrecord(os.path.join(record_path,dbname,record_name))
+    recatr = wfdb.rdann(os.path.join(record_path,dbname,record_name),'atr')
+    recqrs = wfdb.rdann(os.path.join(record_path,dbname,record_name),'qrs')
+
+    #read in the header and get the leads
+    with open(os.path.join(record_path,dbname,record_name+'.hea'),'r') as headf:
+        headf.readline()
+        header_leads = [headf.readline().strip().split(' ')[-1] for il in range(record.p_signal.shape[1]) ]
+
+
+    if np.any(np.array(record.units)!='mV'):
+        raise Exception('alternate units not implemented yet')
+
+    beat_sample = np.array(recqrs.sample)
+    beat_symbol = np.array(recqrs.symbol)
+
+    raw_bound = np.where(np.array(recatr.symbol)=='+')[0]
+    aux_note = [  an[1:].split('\x00')[0] for an in np.array(recatr.aux_note)[raw_bound]]
+
+    #get the boundaries
+    boundary_ind = [(raw_bound[k],raw_bound[k+1]) for k in range(len(raw_bound)-1)]
+    boundary_ind.append( (raw_bound[len(raw_bound)-1],-1) )
+    boundary = [(recatr.sample[b[0]],recatr.sample[b[1]]) for b in boundary_ind]
+
+    atc_span = []
+    span_rhythm = []
+    for k in range(len(boundary)-1,-1,-1):
+        # do we have enough items for a sample?
+        if (boundary[k][1]-boundary[k][0])<split_length*record.fs:
+            boundary.pop(k)
+            continue
+
+        num_seg = (boundary[k][1]-boundary[k][0])//(split_length*record.fs)
+
+        for br in range(num_seg):
+            st = int(boundary[k][0] + br*(split_length*record.fs))
+            en = int(st + split_length*record.fs)
+
+            atc_span.append( (st,en) )
+            span_rhythm.append(aux_note[k])
+
+    #now grab all of the beats and sample positions in the sample
+    segments = []
+    for ind in range(len(atc_span)):
+        span=atc_span[ind]
+
+        #rescale and resample the actual signal
+        numerical_error = False
+        rescaled_signal = np.zeros(shape=[record.p_signal.shape[1],atcfs*split_length], dtype=np.int16)
+        for il in range(record.p_signal.shape[1]):
+            if np.any(np.isnan(record.p_signal[span[0]:span[1],il])):
+                print('nan found in {} at sample index {}; skipping'.format(record_name,span))
+                numerical_error = True
+                continue
+
+            resamp = 2000*signal.resample_poly(record.p_signal[span[0]:span[1],il],atcfs,record.fs)
+
+            if np.any(np.abs(resamp)>=32768):
+                print('int16 overflow in {} in sample range {}; skipping'.format(record_name,span))
+                numerical_error = True
+                continue
+                # raise Exception('int16 overflow')
+            rescaled_signal[il,:] = resamp.astype(np.int16)
+        if numerical_error:
+            continue
+
+        #rescale the beat indices
+        beat_labels = beat_symbol[np.where(np.logical_and(beat_sample>=span[0], beat_sample<span[1]))]
+        beat_samples = ((beat_sample[np.where(np.logical_and(beat_sample>=span[0], beat_sample<span[1]))]-span[0])*atcfs/record.fs).astype(np.uint32)
+
+        segments.append({
+            'source_file': dbname+record_name,
+            'source_ind': span,
+            'signal': rescaled_signal,
+            'beat_label': beat_labels,
+            'beat_index': beat_samples,
+            'rhythm_label': span_rhythm[ind],
+            'header_leads': header_leads
+        })
+
+    sorted(segments, key=lambda x: x['source_ind'][0])
+
+    return(segments)
 
 
 #the same logic as to split_physionet_filter, with a 1st order butterworth highpass filter applied to the signal (applied twice, per scipy.signal.filtfilt)
@@ -424,6 +511,25 @@ def generate_cudb_manifest(seg_list):
     return manifest
 
 
+def generate_afdb_manifest(seg_list):
+    manifest = {
+        'dataset': {
+            'name': 'afdb',
+            'description': 'MIT-BIH Atrial Fibrillation Database',
+            'source': 'Moody GB, Mark RG. A new method for detecting atrial fibrillation using R-R intervals. Computers in Cardiology. 10:227-230 (1983)',
+        },
+        'recordings': [],
+        'labels': {
+            'algsuite_target':{
+                'description': 'the result we expect alg-suite to produce',
+                'type': 'rhythm'
+            }
+        }
+    }
+    add_segments_to_manifest(manifest, seg_list)
+    return manifest
+
+
 def classify_mit_segments(all_segments):
     # filter out any segments that are paced
     all_segments = [s for s in all_segments if s['rhythm_label']!='P']
@@ -433,7 +539,7 @@ def classify_mit_segments(all_segments):
         if seg['rhythm_label'] == 'VT' or seg['rhythm_label'] == 'VFL':
             seg['alg_label'] = ['unclassified']
             continue
-        if seg['rhythm_label'] == 'AF' or seg['rhythm_label'] == 'AFL':
+        if seg['rhythm_label'] == 'AFIB' or seg['rhythm_label'] == 'AFL':
             seg['alg_label'] = ['afib']
             continue
 
