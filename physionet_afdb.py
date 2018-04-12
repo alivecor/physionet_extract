@@ -52,6 +52,13 @@ if __name__ == "__main__":
         json.dump(manifest,f,indent=4)
 
 
+    shalist = {}
     for seg in all_segments:
-        code_path['write'](seg, targpath)
+        seg_sha = code_path['write'](seg, targpath)
+        for k in seg_sha.keys():
+            shalist[k]=seg_sha[k]
+
+    with open(os.path.join(targpath,'SHA256SUMS'),'w') as f:
+        for s in shalist.keys():
+            f.writelines('{}\t{}\n'.format(shalist[s],s))
 

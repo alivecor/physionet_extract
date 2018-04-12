@@ -1,5 +1,5 @@
 import numpy as np
-import os,re
+import os,re,hashlib
 import ujson as json
 from scipy import signal
 import scipy.signal
@@ -374,7 +374,8 @@ def split_physionet_highpass_file(record_path, dbname, record_name, split_length
 
     return(segments)
 
-def write_atc_from_segment(seg, dbpath):
+
+def write_atc_from_segment(seg, targpath):
 
     atc_data_dict={}
 
@@ -403,19 +404,37 @@ def write_atc_from_segment(seg, dbpath):
     atc_data_dict['fmt']['Flags'] = 0
     atc_data_dict['fmt']['Reserved'] = 0
 
+    shalist = {}
     for il in range(seg['signal'].shape[0]):
         atc_data_dict['ecg']={}
         atc_data_dict['ecg']['DataLen'] = 2*seg['signal'].shape[1]
         atc_data_dict['ecg']['Data'] = seg['signal'][il,:]
 
-        write_atc_file.write_atc_file(os.path.join(dbpath,gen_atc_filebase(seg,il)+'.atc'), atc_data_dict)
+        atcfn = gen_atc_filebase(seg,il)+'.atc'
+        write_atc_file.write_atc_file(os.path.join(targpath,atcfn), atc_data_dict)
+
+        #calculate the sha256 of the atc just written
+        hf = hashlib.sha256()
+        with open(os.path.join(targpath,atcfn),'rb') as f:
+            hf.update( f.read() )
+        shalist[atcfn] = hf.hexdigest()
 
         #write an additonal json with the algsuite_target annotation
         algsuite_target = {
             'globalLabels': seg['alg_label']
         }
-        with open(os.path.join(dbpath,gen_atc_filebase(seg,il)+'.algsuite_target.json'),'w') as f:
+        algjsonfn = gen_atc_filebase(seg,il)+'.algsuite_target.json'
+        with open(os.path.join(targpath,algjsonfn),'w') as f:
             json.dump(algsuite_target,f)
+
+        #calculate the sha256 of the atc just written
+        hf = hashlib.sha256()
+        with open(os.path.join(targpath,algjsonfn),'rb') as f:
+            hf.update( f.read() )
+        shalist[algjsonfn] = hf.hexdigest()
+
+    return shalist
+
 
 
 def add_segments_to_manifest(manifest, seg_list):
