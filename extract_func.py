@@ -210,7 +210,7 @@ def split_vfdb_file(record_path, dbname, record_name, split_length, verbose=True
     #read in the header and get the leads
     with open(os.path.join(record_path,dbname,record_name+'.hea'),'r') as headf:
         headf.readline()
-        header_leads = [headf.readline().strip().split(' ')[-1] for il in range(record.p_signal.shape[1]) ]
+        header_leads = [headf.readline().strip().split(' ')[-1]+str(il) for il in range(record.p_signal.shape[1]) ]
 
 
     if np.any(np.array(record.units)!='mV'):
@@ -394,7 +394,7 @@ def split_physionet_highpass_file(record_path, dbname, record_name, split_length
     aux_note = [  an[1:].split('\x00')[0] for an in np.array(recatr.aux_note)[raw_bound]]
 
     #get the boundaries
-    boundary_ind = [(raw_bound[k]+1,raw_bound[k+1]) for k in range(len(raw_bound)-1)]
+    boundary_ind = [(raw_bound[k],raw_bound[k+1]) for k in range(len(raw_bound)-1)]
     boundary_ind.append( (raw_bound[len(raw_bound)-1],-1) )
     boundary = [(recatr.sample[b[0]],recatr.sample[b[1]]) for b in boundary_ind]
 
