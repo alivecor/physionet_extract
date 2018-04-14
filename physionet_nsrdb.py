@@ -9,7 +9,7 @@ np.seterr(all='raise')
 
 nsrdb_codepath = {
     'db': 'nsrdb',
-    'split': extract_func.split_cudb_file,
+    'split': extract_func.split_physionet_file,
     'classify': extract_func.classify_mit_segments,
     'manifest': extract_func.generate_nsrdb_manifest,
     'write': extract_func.write_atc_from_segment
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     all_segments = []
     for dbn in dbnames:
         # all_segments += split_physionet_file(dbpath,db,dbn,30)
-        all_segments += code_path['split'](dbpath,db,dbn,30)
+        all_segments += code_path['split'](dbpath,db,dbn,30,default_rhythm='N')
 
 
     #add our specific classifications to these

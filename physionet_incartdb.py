@@ -7,23 +7,23 @@ import extract_func
 np.seterr(all='raise')
 
 
-cudb_codepath = {
-    'db': 'cudb',
+incartdb_codepath = {
+    'db': 'incartdb',
     'split': extract_func.split_physionet_file,
-    'classify': extract_func.classify_cudb_segments,
-    'manifest': extract_func.generate_cudb_manifest,
+    'classify': extract_func.classify_mit_segments,
+    'manifest': extract_func.generate_incartdb_manifest,
     'write': extract_func.write_atc_from_segment
 }
 
 
 if __name__ == "__main__":
 
-    code_path = cudb_codepath
+    code_path = incartdb_codepath
 
     #get the files in the database
     dbnames=set()
     dbpath = '/Users/schram/projects/physionet_extract/'
-    targpath = '/Users/schram/projects/physionet_extract/cudbout'
+    targpath = '/Users/schram/projects/physionet_extract/incartdbout'
     if os.path.exists(targpath)==False:
         os.makedirs(targpath)
     db = code_path['db']
@@ -36,11 +36,8 @@ if __name__ == "__main__":
 
     all_segments = []
     for dbn in dbnames:
-        if dbn in ('cu12', 'cu15', 'cu24', 'cu25', 'cu32'):
-            print(dbn+': PACED; SKIPPING')
-            continue
-        print(dbn)
-        all_segments += code_path['split'](dbpath,db,dbn,30,default_rhythm='N')
+        # all_segments += split_physionet_file(dbpath,db,dbn,30)
+        all_segments += code_path['split'](dbpath,db,dbn,30,default_rhythm='N', highpass_freq_cutoff=0.1)
 
 
     #add our specific classifications to these
@@ -61,6 +58,8 @@ if __name__ == "__main__":
     with open(os.path.join(targpath,'SHA256SUMS'),'w') as f:
         for s in shalist.keys():
             f.writelines('{}\t{}\n'.format(shalist[s],s))
+
+
 
 
 

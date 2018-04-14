@@ -9,7 +9,7 @@ np.seterr(all='raise')
 
 nst_codepath = {
     'db': 'nstdb',
-    'split': extract_func.split_physionet_highpass_file,
+    'split': extract_func.split_physionet_file,
     'classify': extract_func.classify_mit_segments,
     'manifest': extract_func.generate_nst_manifest,
     'write': extract_func.write_atc_from_segment
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     for dbn in dbnames:
         # all_segments += split_physionet_file(dbpath,db,dbn,30)
         print(dbn)
-        all_segments += code_path['split'](dbpath,db,dbn,30)
+        all_segments += code_path['split'](dbpath,db,dbn,30,highpass_freq_cutoff=0.1)
 
 
     #add our specific classifications to these
