@@ -1,10 +1,13 @@
-import os,re
+import os,re,argparse
 import ujson as json
 import numpy as np
 
 import extract_func
 
 np.seterr(all='raise')
+
+import functools
+print = functools.partial(print, flush=True)
 
 
 mit_codepath = {
@@ -18,12 +21,18 @@ mit_codepath = {
 
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser(description='Extract data from mitdb', allow_abbrev=True)
+    parser.add_argument('--path','-p', type=str, help='base path for file read/write (mitdb will be appended)')
+    args = parser.parse_args()
+    if args.path==None:
+        args.path = os.getcwd()
+
     code_path = mit_codepath
 
     #get the files in the database
     dbnames=set()
-    dbpath = '/Users/schram/projects/physionet_extract/'
-    targpath = '/Users/schram/projects/physionet_extract/mitout'
+    dbpath = args.path
+    targpath = os.path.join(args.path, 'mitdbout')
     if os.path.exists(targpath)==False:
         os.makedirs(targpath)
     db = code_path['db']
@@ -36,7 +45,7 @@ if __name__ == "__main__":
 
     all_segments = []
     for dbn in dbnames:
-        # all_segments += split_physionet_file(dbpath,db,dbn,30)
+        print(dbn)
         all_segments += code_path['split'](dbpath,db,dbn,30)
 
 

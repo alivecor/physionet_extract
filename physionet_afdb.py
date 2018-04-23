@@ -1,10 +1,13 @@
-import os,re
+import os,re,argparse
 import ujson as json
 import numpy as np
 
 import extract_func
 
 np.seterr(all='raise')
+
+import functools
+print = functools.partial(print, flush=True)
 
 
 afdb_codepath = {
@@ -18,12 +21,18 @@ afdb_codepath = {
 
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser(description='Extract data from afdb', allow_abbrev=True)
+    parser.add_argument('--path','-p', type=str, help='base path for file read/write (afdb will be appended)')
+    args = parser.parse_args()
+    if args.path==None:
+        args.path = os.getcwd()
+
     code_path = afdb_codepath
 
     #get the files in the database
     dbnames=set()
-    dbpath = '/Users/schram/projects/physionet_extract/'
-    targpath = '/Users/schram/projects/physionet_extract/afdbout'
+    dbpath = args.path
+    targpath = os.path.join(args.path, 'afdbout')
     if os.path.exists(targpath)==False:
         os.makedirs(targpath)
     db = code_path['db']
