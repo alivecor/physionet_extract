@@ -35,6 +35,8 @@ if __name__ == "__main__":
     targpath = os.path.join(args.path, 'nsrdbout')
     if os.path.exists(targpath)==False:
         os.makedirs(targpath)
+    if os.path.exists(os.path.join(targpath,'data'))==False:
+        os.makedirs(os.path.join(targpath,'data'))
     db = code_path['db']
     for f in os.listdir(os.path.join(dbpath,db)):
         fnmatch = re.match('(.*)\.atr$',f)
