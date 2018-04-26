@@ -26,7 +26,6 @@ def split_physionet_file(record_path, dbname, record_name, split_length, default
         headf.readline()
         header_leads = [headf.readline().strip().split(' ')[-1] for il in range(record.p_signal.shape[1]) ]
 
-
     if np.any(np.array(record.units)!='mV'):
         raise Exception('alternate units not implemented yet')
 
@@ -491,10 +490,227 @@ def split_qtdb_file(record_path, record_name, split_length, source_data):
             segments[-1]['annot2_label'] = m2seg_labels
             segments[-1]['annot2_num'] = m2seg_num
 
-
     return segments
 
 
+
+
+def add_beat_segments(segment_list, symbol, stind, enind, symind):
+    if symbol in ('A','N','Q','B'):
+        segment_list.append({
+            'label': 'qrs',
+            'sample': stind,
+            'duration': 1,
+            'note': 'onset',
+            'qtdbtype': symbol
+        })
+        segment_list.append({
+            'label': 'qrs',
+            'sample': symind,
+            'duration': 1,
+            'note': 'peak',
+            'qtdbtype': symbol
+        })
+        segment_list.append({
+            'label': 'qrs',
+            'sample': enind,
+            'duration': 1,
+            'note': 'offset',
+            'qtdbtype': symbol
+        })
+    else:
+        if stind:
+            segment_list.append({
+                'label': symbol,
+                'sample': stind,
+                'duration': 1,
+                'note': 'onset'
+            })
+        if symind:
+            segment_list.append({
+                'label': symbol,
+                'sample': symind,
+                'duration': 1,
+                'note': 'peak'
+            })
+        if enind:
+            segment_list.append({
+                'label': symbol,
+                'sample': enind,
+                'duration': 1,
+                'note': 'offset'
+            })
+
+    return segment_list
+
+
+
+def pull_qtdb_manual_beats(record_path,record_name,source_data,out_sec=1.5, highpass_freq_cutoff=None):
+    atcfs=300
+
+    #read in the signal and the record from the source database
+    record = wfdb.rdrecord(os.path.join(record_path,'qtdb',record_name))
+    src_record = wfdb.rdrecord(os.path.join(record_path,source_data['srcdb'],re.sub('sel','',record_name)))
+
+    if highpass_freq_cutoff:
+        # apply a 0.1Hz highpass butterworth filter to the signal
+        b,a=scipy.signal.butter(N=1,Wn=highpass_freq_cutoff*np.pi/record.fs,btype='highpass',analog=False)
+        filt_signal = scipy.signal.filtfilt(b,a, record.p_signal, axis=0)
+    else:
+        filt_signal = record.p_signal
+
+    #read in the header and get the leads
+    with open(os.path.join(record_path,'qtdb',record_name+'.hea'),'r') as headf:
+        headf.readline()
+        header_leads = [headf.readline().strip().split(' ')[-1] for il in range(record.p_signal.shape[1]) ]
+
+    #verify we are using millivolts
+    if np.any(np.array(record.units)!='mV'):
+        raise Exception('alternate units not implemented yet')
+
+    #read in the automated ecgpuwave annotations
+    ecgpu0 = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'pu0')
+    ecgpu1 = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'pu1')
+
+    #read in the manual annotation files
+    manpos = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'man')
+    q1c = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'q1c')
+    qt1 = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'qt1')
+    q2c = None
+    qt2 = None
+    if os.path.exists(os.path.join(record_path,'qtdb',record_name+'q2c')):
+        q2c = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'q2c')
+        qt2 = wfdb.rdann(os.path.join(record_path,'qtdb',record_name),'qt2')
+
+    ecgpu0_pos = np.array([ecgpu0.sample[x] for x in range(len(ecgpu0.symbol)) if ecgpu0.symbol[x]=='N'  ])
+    ecgpu0_posind = np.array([x for x in range(len(ecgpu0.symbol)) if ecgpu0.symbol[x]=='N'  ])
+    ecgpu1_pos = np.array([ecgpu1.sample[x] for x in range(len(ecgpu1.symbol)) if ecgpu1.symbol[x]=='N'  ])
+    ecgpu1_posind = np.array([x for x in range(len(ecgpu1.symbol)) if ecgpu1.symbol[x]=='N'  ])
+
+    all_beats=[]
+
+    for mpind in range(len(manpos.symbol)):
+        #create an initial target for where we should pull signal from
+        #qrs center should be 2/5 through target signal
+        sigst=manpos.sample[mpind]-int(2/5*record.fs*out_sec)
+        sigen=sigst + int(record.fs*out_sec)
+
+        ##get the manual position samples that are between this range
+        q1keep = [(q1c.sample[x],q1c.symbol[x]) for x in range(len(qt1.sample)) if qt1.sample[x]>=sigst and qt1.sample[x]<sigen]
+        q1ind = [q[0] for q in q1keep]
+        q1center = np.where( np.abs(q1ind-manpos.sample[mpind])==np.min(np.abs(q1ind-manpos.sample[mpind])) )[0][0]
+        q1s=q1center-1
+        #make sure that we include only those annotations associated with the current beat
+        while q1s>0:
+            q1s-=1
+            if q1keep[q1s][1] in ('t','u','N','B','A','Q') and q1keep[q1s+1][1]==')':
+                q1s+=2
+                break
+        q1e=q1center+1
+        while q1e<len(q1keep)-1:
+            q1e+=1
+            if q1keep[q1e-1][1]=='(' and q1keep[q1e][1] in ('p','N','B','A','Q'):
+                q1e-=1
+                break
+        #now, if there is a previous heartrate boundary, keep that annotation for now
+        if(q1s!=0 and q1keep[q1s-1][1]==')'):
+            q1s-=1
+        if(q1e!=len(q1keep)-1 and q1keep[q1e+1][1]==')'):
+            q1e+=1
+        q1keep=q1keep[q1s:q1e+1]
+
+        if len(q1keep)==0:
+            print('nonsensical annotation found in {}/{} at sample {}'.format('qtdb',record_name,manpos.sample[mpind]))
+            continue
+
+        #if the tail/head of the q1keep is a beat onset/offset from the next/previous beat, use that to truncate the signal range to pull from
+        if q1keep[0][1]==')':
+            sigst = q1keep[0][0]
+            q1keep=q1keep[1:]
+        if q1keep[-1][1]=='(':
+            sigen = q1keep[-1][0]
+            q1keep = q1keep[:-1]
+
+        #TODO: repeat with second annotator, if it exists
+
+        ##now, look for the closest beat center given by ecgpu, and use that to figure out where to restrict the source signal indices
+        usesampind0 = np.where( np.abs(ecgpu0_pos-manpos.sample[mpind])==np.min(np.abs(ecgpu0_pos-manpos.sample[mpind])))[0][0]
+        usesampind1 = np.where( np.abs(ecgpu1_pos-manpos.sample[mpind])==np.min(np.abs(ecgpu1_pos-manpos.sample[mpind])))[0][0]
+
+        (beatmpst,beatmpen) = (0,0)
+        if usesampind0>0: beatmpst = max(sigst, 2*ecgpu0_pos[usesampind0-1]//5 + 3*ecgpu0_pos[usesampind0]//5 )
+        if usesampind1>0: beatmpst = max(beatmpst, 2*ecgpu1_pos[usesampind1-1]//5 + 3*ecgpu1_pos[usesampind1]//5 )
+        if usesampind0<len(ecgpu0_pos)-1: beatmpen = max(sigen, 2*ecgpu0_pos[usesampind0-1]//5 + 3*ecgpu0_pos[usesampind0]//5 )
+        if usesampind1<len(ecgpu1_pos)-1: beatmpen = max(beatmpen, 2*ecgpu1_pos[usesampind1-1]//5 + 3*ecgpu1_pos[usesampind1]//5 )
+
+        sigst = min(q1keep[0][0],beatmpst)
+        sigen = min(q1keep[-1][0],beatmpen)
+
+        #pull the signal and put it into a new array, and shift the annotation indices
+        src_signal = np.zeros(shape=[int(record.fs*out_sec),record.p_signal.shape[1]])
+        src_signal[ int(2/5*record.fs*out_sec)-(manpos.sample[mpind]-sigst):int(2/5*record.fs*out_sec)+(sigen-manpos.sample[mpind]) ,: ] = (filt_signal[sigst:sigen,:]- np.median(filt_signal[sigst:sigen,:],axis=0))
+        src_signal[ :int(2/5*record.fs*out_sec)-(manpos.sample[mpind]-sigst) ,: ] = np.median(filt_signal[sigst:sigst+5,:],axis=0)
+        src_signal[ int(2/5*record.fs*out_sec)+(sigen-manpos.sample[mpind]): ,: ] = np.median(filt_signal[sigen-5:sigen,:],axis=0)
+        q1keep = [ (qk[0]+int(2/5*record.fs*out_sec)-manpos.sample[mpind], qk[1] ) for qk in q1keep ]
+
+        ##resample the signal at the atc frequency
+        numerical_error = False
+        rescaled_signal = np.empty(shape=[2,int(atcfs*out_sec)],dtype=np.int16)
+        for il in range(src_signal.shape[1]):
+            if np.any(np.isnan(src_signal[:,il])):
+                print('nan found in {} at sample index {}; skipping'.format(record_name,span))
+                numerical_error = True
+                continue
+
+            resamp = 2000*signal.resample_poly(src_signal[:,il],atcfs,record.fs)
+
+            if np.any(np.abs(resamp)>=32768):
+                print('int16 overflow in {} in sample range {}; skipping'.format(record_name,span))
+                numerical_error = True
+                continue
+            rescaled_signal[il,:] = resamp.astype(np.int16)
+        if numerical_error:
+            continue
+        #rescale the annotations
+        q1keep = [ (int(qk[0]*atcfs/record.fs), qk[1] ) for qk in q1keep ]
+
+        beat = {
+            'db': 'qtdb',
+            'record': record_name,
+            'src_center': manpos.sample[mpind],
+            'src_start': sigst,
+            'src_end': sigen,
+            'signal': rescaled_signal,
+            'beatLabels': []
+        }
+        if q2c:
+            beat['beatLabels_alt']=[]
+
+        ##now go through and attempt to parse the annotations
+        sym=None
+        symi=None
+        sti=None
+        eni=None
+        for qind in range(len(q1keep)):
+            #we are starting a new segment - clear it out and mark where it was
+            if q1keep[qind][1] == '(':
+                #was there a beat segment?
+                if sym:
+                    add_beat_segments(beat['beatLabels'], sym, sti,eni,symi)
+                (sti,eni,sym,symi)=(None,None,None,None)    # clear out the annotation log
+                sti=q1keep[qind][0]
+            # we are ending a segment - clear it out and mark where it was
+            elif q1keep[qind][1] == ')':
+                if sym:
+                    eni=q1keep[qind][0]
+                    add_beat_segments(beat['beatLabels'], sym, sti,eni,symi)
+                (sti,eni,sym,symi)=(None,None,None,None)
+            else:
+                sym=q1keep[qind][1]
+                symi=q1keep[qind][0]
+        all_beats.append(beat)
+        
+    return all_beats
 
 
 
@@ -564,15 +780,14 @@ def write_atc_from_segment(seg, targpath):
 def add_segments_to_manifest(manifest, seg_list):
     for seg in seg_list:
         for il in range(len(seg['header_leads'])):
-            manifest['recordings'].append({
-                'filename': gen_atc_filebase(seg,il)+'.atc',
+            manifest['recordings'][gen_atc_filebase(seg,il)+'.atc'] = {
                 'type': 'atc',
                 'metadata': {
                     'lead': seg['header_leads'][il],
                     'source_record': seg['source_file'],
                     'source_index': seg['source_ind']
                 }
-            })
+            }
 
     return manifest
 
@@ -584,12 +799,15 @@ def generate_mit_manifest(seg_list):
             'description': 'MIT-BIH Arrhythmia Database',
             'source': 'Moody GB, Mark RG. The impact of the MIT-BIH Arrhythmia Database. IEEE Eng in Med and Biol 20(3):45-50 (May-June 2001). (PMID: 11446209)'
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/mitdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -609,6 +827,9 @@ def generate_nst_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/nstdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -628,6 +849,9 @@ def generate_edb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/edb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -648,6 +872,9 @@ def generate_cudb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/cudb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -667,6 +894,9 @@ def generate_afdb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/afdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -687,6 +917,9 @@ def generate_vfdb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/vfdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -706,6 +939,9 @@ def generate_nsrdb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/nsrdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -725,6 +961,9 @@ def generate_svdb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/svdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
@@ -745,6 +984,9 @@ def generate_incartdb_manifest(seg_list):
                 'description': 'the result we expect alg-suite to produce',
                 'type': 'rhythm'
             }
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/incartdb/"
         }
     }
     add_segments_to_manifest(manifest, seg_list)
