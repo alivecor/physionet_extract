@@ -14,8 +14,6 @@ def gen_atc_filebase(seg,ind_lead):
     return '{}_{}_{}'.format(seg['source_file'],seg['source_ind'][0],seg['header_leads'][ind_lead])
 
 
-
-
 def split_physionet_file(record_path, dbname, record_name, split_length, default_rhythm=None, highpass_freq_cutoff=None):
     #read in the signal and the annotations
     record = wfdb.rdrecord(os.path.join(record_path,dbname,record_name))
@@ -298,7 +296,7 @@ def split_afdb_file(record_path, dbname, record_name, split_length):
 
 
 
-def split_qtdb_file(record_path, record_name, split_length, source_data):
+def split_qtdb_file(record_path, record_name, split_length, source_data, highpass_freq_cutoff=0.1):
     #read in the signal and the record from the source database
     record = wfdb.rdrecord(os.path.join(record_path,'qtdb',record_name))
     src_record = wfdb.rdrecord(os.path.join(record_path,source_data['srcdb'],re.sub('sel','',record_name)))
@@ -417,6 +415,13 @@ def split_qtdb_file(record_path, record_name, split_length, source_data):
             atc_span.append( (st,en) )
             span_rhythm.append(aux_note[k])
 
+    if highpass_freq_cutoff:
+        # apply a 0.1Hz highpass butterworth filter to the signal
+        b,a=scipy.signal.butter(N=1,Wn=highpass_freq_cutoff*np.pi/record.fs,btype='highpass',analog=False)
+        filt_signal = scipy.signal.filtfilt(b,a, record.p_signal, axis=0)
+    else:
+        filt_signal = record.p_signal
+
     #now grab all of the beats and sample positions in the sample
     segments = []
     for ind in range(len(atc_span)):
@@ -431,7 +436,7 @@ def split_qtdb_file(record_path, record_name, split_length, source_data):
                 numerical_error = True
                 continue
 
-            resamp = 2000*signal.resample_poly(record.p_signal[span[0]:span[1],il],atcfs,record.fs)
+            resamp = 2000*signal.resample_poly(filt_signal[span[0]:span[1],il],atcfs,record.fs)
 
             if np.any(np.abs(resamp)>=32768):
                 print('int16 overflow in {} in sample range {}; skipping'.format(record_name,span))
@@ -491,7 +496,6 @@ def split_qtdb_file(record_path, record_name, split_length, source_data):
             segments[-1]['annot2_num'] = m2seg_num
 
     return segments
-
 
 
 
@@ -596,7 +600,7 @@ def pull_qtdb_manual_beats(record_path,record_name,source_data,out_sec=1.5, high
         sigen=sigst + int(record.fs*out_sec)
 
         ##get the manual position samples that are between this range
-        q1keep = [(q1c.sample[x],q1c.symbol[x]) for x in range(len(qt1.sample)) if qt1.sample[x]>=sigst and qt1.sample[x]<sigen]
+        q1keep = [(q1c.sample[x],q1c.symbol[x]) for x in range(len(q1c.sample)) if q1c.sample[x]>=sigst and q1c.sample[x]<sigen]
         q1ind = [q[0] for q in q1keep]
         q1center = np.where( np.abs(q1ind-manpos.sample[mpind])==np.min(np.abs(q1ind-manpos.sample[mpind])) )[0][0]
         q1s=q1center-1
@@ -658,14 +662,14 @@ def pull_qtdb_manual_beats(record_path,record_name,source_data,out_sec=1.5, high
         rescaled_signal = np.empty(shape=[2,int(atcfs*out_sec)],dtype=np.int16)
         for il in range(src_signal.shape[1]):
             if np.any(np.isnan(src_signal[:,il])):
-                print('nan found in {} at sample index {}; skipping'.format(record_name,span))
+                print('nan found in {} at sample index {}; skipping'.format(record_name,(sigst,sigen)))
                 numerical_error = True
                 continue
 
             resamp = 2000*signal.resample_poly(src_signal[:,il],atcfs,record.fs)
 
             if np.any(np.abs(resamp)>=32768):
-                print('int16 overflow in {} in sample range {}; skipping'.format(record_name,span))
+                print('int16 overflow in {} in sample range {}; skipping'.format(record_name,(sigst,sigen)))
                 numerical_error = True
                 continue
             rescaled_signal[il,:] = resamp.astype(np.int16)
@@ -675,11 +679,10 @@ def pull_qtdb_manual_beats(record_path,record_name,source_data,out_sec=1.5, high
         q1keep = [ (int(qk[0]*atcfs/record.fs), qk[1] ) for qk in q1keep ]
 
         beat = {
-            'db': 'qtdb',
-            'record': record_name,
-            'src_center': manpos.sample[mpind],
-            'src_start': sigst,
-            'src_end': sigen,
+            'source_file': 'qtdb'+record_name,
+            'source_center': int(manpos.sample[mpind]),
+            'source_ind': (int(sigst),int(sigen)),
+            'header_leads': header_leads,
             'signal': rescaled_signal,
             'beatLabels': []
         }
@@ -711,8 +714,6 @@ def pull_qtdb_manual_beats(record_path,record_name,source_data,out_sec=1.5, high
         all_beats.append(beat)
         
     return all_beats
-
-
 
 
 def write_atc_from_segment(seg, targpath):
@@ -775,6 +776,62 @@ def write_atc_from_segment(seg, targpath):
 
     return shalist
 
+def write_beat_atc_from_segment(seg, targpath):
+
+    atc_data_dict={}
+
+    # File signature and file version
+    atc_data_dict['header'] = {}
+    atc_data_dict['header']['FileSig'] = (b'ALIVE', 0, 0, 0)
+    atc_data_dict['header']['FileVer'] = 2
+
+    # Info Block
+    atc_data_dict['info'] = {}
+    atc_data_dict['info']['DataLen'] = 264
+    atc_data_dict['info']['DateRec'] = '1975-01-01T00:00:00.000+00:00'.encode('utf-8')
+    atc_data_dict['info']['RecUUID'] = ''.encode('utf-8')
+    atc_data_dict['info']['PhoneUDID'] = ''.encode('utf-8')
+    atc_data_dict['info']['PhoneModel'] = ''.encode('utf-8')
+    atc_data_dict['info']['RecSW'] = ''.encode('utf-8')
+    atc_data_dict['info']['RecHW'] = 'holter'.encode('utf-8')
+    atc_data_dict['info']['Loc'] = ''.encode('utf-8')
+
+    # ECG Format Block
+    atc_data_dict['fmt'] = {}
+    atc_data_dict['fmt']['DataLen'] = 8
+    atc_data_dict['fmt']['ECGFormat'] = 1
+    atc_data_dict['fmt']['Fs'] = 300
+    atc_data_dict['fmt']['AmpRes_nV'] = 500
+    atc_data_dict['fmt']['Flags'] = 0
+    atc_data_dict['fmt']['Reserved'] = 0
+
+    shalist = {}
+    for il in range(seg['signal'].shape[0]):
+        atc_data_dict['ecg']={}
+        atc_data_dict['ecg']['DataLen'] = 2*seg['signal'].shape[1]
+        atc_data_dict['ecg']['Data'] = seg['signal'][il,:]
+
+        atcfn = gen_atc_filebase(seg,il)+'.atc'
+        write_atc_file.write_atc_file(os.path.join(targpath,atcfn), atc_data_dict)
+
+        #calculate the sha256 of the atc just written
+        hf = hashlib.sha256()
+        with open(os.path.join(targpath,atcfn),'rb') as f:
+            hf.update( f.read() )
+        shalist[atcfn] = hf.hexdigest()
+
+        #write an additonal json with the algsuite_target annotation
+        beatjson = gen_atc_filebase(seg,il)+'.beat_segments.json'
+        with open(os.path.join(targpath,beatjson),'w') as f:
+            json.dump(seg['beatLabels'],f)
+
+        #calculate the sha256 of the atc just written
+        hf = hashlib.sha256()
+        with open(os.path.join(targpath,beatjson),'rb') as f:
+            hf.update( f.read() )
+        shalist[beatjson] = hf.hexdigest()
+
+    return shalist
 
 
 def add_segments_to_manifest(manifest, seg_list):
@@ -790,6 +847,23 @@ def add_segments_to_manifest(manifest, seg_list):
             }
 
     return manifest
+
+
+def add_beat_segments_to_manifest(manifest, seg_list):
+    for seg in seg_list:
+        for il in range(len(seg['header_leads'])):
+            manifest['recordings'][gen_atc_filebase(seg,il)+'.atc'] = {
+                'type': 'atc',
+                'metadata': {
+                    'lead': seg['header_leads'][il],
+                    'source_record': seg['source_file'],
+                    'source_index': seg['source_ind'],
+                    'source_beat_pos': seg['source_center'],
+                }
+            }
+
+    return manifest
+
 
 
 def generate_mit_manifest(seg_list):
@@ -993,6 +1067,52 @@ def generate_incartdb_manifest(seg_list):
     return manifest
 
 
+def generate_qtdb_manifest(seg_list):
+    manifest = {
+        'dataset': {
+            'name': 'qtdb',
+            'description': 'The QT Database',
+            'source': 'Laguna P, Mark RG, Goldberger AL, Moody GB. A Database for Evaluation of Algorithms for Measurement of QT and Other Waveform Intervals in the ECG. Computers in Cardiology 24:673-676 (1997).',
+            'notes': 'Signal sent through 0.1Hz butterworth filter'
+        },
+        'recordings': {},
+        'labels': {
+            'algsuite_target':{
+                'description': 'the result we expect alg-suite to produce',
+                'type': 'rhythm'
+            },
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/qtdb/"
+        }
+    }
+    add_segments_to_manifest(manifest, seg_list)
+    return manifest
+
+
+def generate_qtdb_segment_manifest(seg_list):
+    manifest = {
+        'dataset': {
+            'name': 'qtdb',
+            'description': 'The QT Database',
+            'source': 'Laguna P, Mark RG, Goldberger AL, Moody GB. A Database for Evaluation of Algorithms for Measurement of QT and Other Waveform Intervals in the ECG. Computers in Cardiology 24:673-676 (1997).',
+            'notes': 'Signal sent through 0.1Hz butterworth filter'
+        },
+        'recordings': {},
+        'labels': {
+            'beat_segments':{
+                'description': 'the positions of p, QRS, t, and u onset,peak,and offsets',
+                'type': 'segment'
+            },
+        },
+        "metadata":{
+            "website": "https://physionet.org/physiobank/database/qtdb/"
+        }
+    }
+    add_beat_segments_to_manifest(manifest, seg_list)
+    return manifest
+
+
 def classify_mit_segments(all_segments):
     # filter out any segments that are paced
     all_segments = [s for s in all_segments if s['rhythm_label']!='P']
@@ -1063,7 +1183,6 @@ def classify_cudb_segments(all_segments):
         else:
             seg['alg_label'] = 'unclassified'
 
-
     return(all_segments)
 
 
@@ -1089,4 +1208,6 @@ def classify_vfdb_segments(all_segments):
 
 
     return(all_segments)
+
+
 
