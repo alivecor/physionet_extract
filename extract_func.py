@@ -631,7 +631,7 @@ def pull_qtdb_manual_beats(record_path,record_name,source_data,out_sec=1.5, high
             sigen = q1keep[-1][0]
             q1keep = q1keep[:-1]
 
-        #TODO: repeat with second annotator, if it exists
+        ####TODO: repeat with second annotator, if it exists
 
         ##now, look for the closest beat center given by ecgpu, and use that to figure out where to restrict the source signal indices
         usesampind0 = np.where( np.abs(ecgpu0_pos-manpos.sample[mpind])==np.min(np.abs(ecgpu0_pos-manpos.sample[mpind])))[0][0]
@@ -821,7 +821,7 @@ def generate_nst_manifest(seg_list):
             'description': 'MIT-BIH Noise Stress Test Database, sent through 0.1Hz butterworth filter. Excluded samples with signal above atc range (+/-16mV)',
             'source': 'Moody GB, Muldrow WE, Mark RG. A noise stress test for arrhythmia detectors. Computers in Cardiology 1984; 11:381-384'
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -843,7 +843,7 @@ def generate_edb_manifest(seg_list):
             'description': 'European ST-T Database',
             'source': 'Taddei A, Distante G, Emdin M, Pisani P, Moody GB, Zeelenberg C, Marchesi C. The European ST-T Database: standard for evaluating systems for the analysis of ST-T changes in ambulatory electrocardiography. European Heart Journal 13: 1164-1172 (1992)'
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -866,7 +866,7 @@ def generate_cudb_manifest(seg_list):
             'source': 'Nolle FM, Badura FK, Catlett JM, Bowser RW, Sketch MH. CREI-GARD, a new concept in computerized arrhythmia monitoring systems. Computers in Cardiology 13:515-518 (1986)',
             'notes': 'Matt is suspicious of the rhythm labels or lack thereof'
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -888,7 +888,7 @@ def generate_afdb_manifest(seg_list):
             'description': 'MIT-BIH Atrial Fibrillation Database',
             'source': 'Moody GB, Mark RG. A new method for detecting atrial fibrillation using R-R intervals. Computers in Cardiology. 10:227-230 (1983)',
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -911,7 +911,7 @@ def generate_vfdb_manifest(seg_list):
             'source': 'Greenwald SD. Development and analysis of a ventricular fibrillation detector. M.S. thesis, MIT Dept. of Electrical Engineering and Computer Science, 1986',
             'notes': 'No beat labels in this dataset'
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -933,7 +933,7 @@ def generate_nsrdb_manifest(seg_list):
             'description': 'MIT-BIH Normal Sinus Rhythm Database',
             'source': 'Physionet (use standard physionet citation)',
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -955,7 +955,7 @@ def generate_svdb_manifest(seg_list):
             'description': 'MIT-BIH Superventricular Arrhythmia Database',
             'source': 'Greenwald SD. Improved detection and classification of arrhythmias in noise-corrupted electrocardiograms using contextual information. Ph.D. thesis, Harvard-MIT Division of Health Sciences and Technology, 1990',
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
@@ -978,7 +978,7 @@ def generate_incartdb_manifest(seg_list):
             'source': 'Physionet (use standard physionet citation)',
             'notes': 'Signal sent through 0.1Hz butterworth filter'
         },
-        'recordings': [],
+        'recordings': {},
         'labels': {
             'algsuite_target':{
                 'description': 'the result we expect alg-suite to produce',
